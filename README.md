@@ -1,5 +1,28 @@
 # Schema Explorer agent
 
+Example:
+
+Example of request - response
+```bash
+  curl -s \
+    -H 'content-type: application/json' \
+    -X POST \
+    http://localhost:3000/entrypoints/explore/invoke \
+    -d '{"input":{"message":"How do I prep a call to https://schema-explorer.up.railway.app/entrypoints/explore/invoke ?"}}' | jq  
+```
+```json                      
+{
+  "run_id": "41cf278d-3f3a-4b28-80c0-9becc3419cc1",
+  "status": "succeeded",
+  "output": {
+    "sessionId": "643f8bae-33c7-42ea-bd00-f321467881d7",
+    "response": "It looks like accessing the schema for `https://schema-explorer.up.railway.app/entrypoints/explore/invoke` requires payment. Here are the details:\n\n**Payment Requirements:**\n*   **Scheme:** `exact`\n*   **Network:** `base`\n*   **Asset:** `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` (USD Coin)\n*   **Pay To:** `0xFdeAE251395004654FBd741824D08Df95315Ed6c`\n*   **Max Amount Required:** `1000`\n*   **Description:** Speak with a Daydreams agent to explore x402 resources, inspect schemas, and get help shaping request payloads.\n\n**Resource Schema Details:**\n\n**Input Schema (for the `explore` endpoint):**\n*   **Type:** `http`\n*   **Method:** `POST`\n*   **Body Type:** `json`\n*   **Required Body Fields:**\n    *   `message`: A string with a minimum length of 1. (e.g., `\"message\": \"Your query here\"`)\n    *   `sessionId`: A string with a minimum length of 1. (e.g., `\"sessionId\": \"your-session-id\"`)\n\n**Output Schema:**\n*   **Required Fields:**\n    *   `sessionId`: A string.\n    *   `response`: A string.\n    *   `totalRequests`: A number.\n\nTo prepare a call, you would send a POST request with a JSON body containing `message` and `sessionId` fields, after satisfying the payment requirements. For example:\n\n```json\n{\n  \"message\": \"What is the schema for X?\",\n  \"sessionId\": \"your-unique-session-id\"\n}\n```\n\nLet me know if you'd like me to clarify any of these details or help you understand how to construct the payment header!",
+    "totalRequests": 1
+  }
+}
+```
+
+
 This is a simple example that demonstrates usage of the daydreamsai/core library, the lucid-agents/agent-kit package, and openrouter/ai-sdk-provider. 
 
 Paid (or optionally free) concierge template you can point at any API surface. It is optimized for exploring x402-protected resources, surfacing any `accepts` or schema metadata even when the upstream returns `402 Payment Required`. The agent combines:
