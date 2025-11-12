@@ -1,5 +1,5 @@
 {
-  "name": "cashier",
+  "name": "schema-exlorer",
   "module": "index.ts",
   "type": "module",
   "private": true,
