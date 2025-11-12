@@ -468,7 +468,8 @@ const corsAllowedOrigin = process.env.SCHEMAAGENT_CORS_ORIGIN ?? '*';
 const corsHeaders: Record<string, string> = {
   'access-control-allow-origin': corsAllowedOrigin,
   'access-control-allow-methods': 'GET,POST,OPTIONS',
-  'access-control-allow-headers': 'content-type',
+  'access-control-allow-headers': 'content-type, x-payment',
+  'access-control-expose-headers': 'x-payment-response, x-price, x-network, x-pay-to, x-facilitator',
 };
 logger.info('HTTP server configuration resolved', { port, corsAllowedOrigin });
 
