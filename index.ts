@@ -38,7 +38,41 @@ const stringifyUnknown = (value: unknown): string | undefined => {
 };
 
 const extractResponseText = (log: DaydreamsLog): string | undefined => {
-  return stringifyUnknown(log.content) ?? stringifyUnknown(log.data);
+  const pickText = (value: unknown): string | undefined => {
+    if (value === undefined || value === null) {
+      return undefined;
+    }
+
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+        try {
+          return pickText(JSON.parse(trimmed));
+        } catch {
+          // fall through to returning the original string
+        }
+      }
+      return value;
+    }
+
+    if (typeof value === 'number' || typeof value === 'boolean') {
+      return String(value);
+    }
+
+    if (typeof value === 'object') {
+      const record = value as Record<string, unknown>;
+      for (const key of ['content', 'message', 'text']) {
+        const candidate = record[key];
+        if (typeof candidate === 'string' && candidate.trim()) {
+          return candidate;
+        }
+      }
+    }
+
+    return undefined;
+  };
+
+  return pickText(log.content) ?? pickText(log.data) ?? stringifyUnknown(log.content) ?? stringifyUnknown(log.data);
 };
 
 type SupportResult = {
