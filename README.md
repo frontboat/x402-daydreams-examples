@@ -7,6 +7,7 @@ Paid (or optionally free) concierge template you can point at any API surface. I
 - **Daydreams contexts** for per-session memory (request count, rolling transcript, last user message)
 - **OpenRouter LLM** for the actual support responses
 - **Agent Kit** for the HTTP surface, manifest, and x402 paywalling
+- **index.html** page for talking to your agent locally for testing
 
 ## Install
 
