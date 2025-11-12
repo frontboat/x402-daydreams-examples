@@ -19,6 +19,26 @@ type SupportMemory = {
 type DaydreamsLog = {
   ref?: string;
   data?: unknown;
+  content?: unknown;
+  name?: string;
+};
+
+const stringifyUnknown = (value: unknown): string | undefined => {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value === 'string') {
+    return value;
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+};
+
+const extractResponseText = (log: DaydreamsLog): string | undefined => {
+  return stringifyUnknown(log.content) ?? stringifyUnknown(log.data);
 };
 
 type SupportResult = {
@@ -219,13 +239,8 @@ registerEntrypoint({
       input: { type: 'text', data: payload.message },
     })) as DaydreamsLog[];
 
-    const output = result.find((entry) => entry.ref === 'output');
-    const response =
-      output && 'data' in output
-        ? typeof output.data === 'string'
-          ? output.data
-          : JSON.stringify(output.data)
-        : 'I could not process that request.';
+    const output = [...result].reverse().find((entry) => entry.ref === 'output');
+    const response = output ? extractResponseText(output) ?? 'I could not process that request.' : 'I could not process that request.';
 
     contextState.memory.transcript.push({
       role: 'assistant',

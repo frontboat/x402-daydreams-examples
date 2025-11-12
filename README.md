@@ -59,12 +59,12 @@ Invoke the paid (or free, if payments disabled) entrypoint:
 ```bash
 curl -s \
   -H 'content-type: application/json' \
-  -X POST http://localhost:3000/entrypoints/support/invoke \
-  -d '{"input":{"message":"How do I prep a request payload? to http://localhost:3000/entrypoints/support/invoke ?"}}' \
+  -X POST http://localhost:3000/entrypoints/explore/invoke \
+  -d '{"input":{"message":"How do I prep a request payload? to http://localhost:3000/entrypoints/explore/invoke ?"}}' \
   | jq
 ```
 
-Need the schema without paying? `GET http://localhost:3000/entrypoints/support/invoke` returns the same description plus input/output field metadata so tools like x402scan can introspect the endpoint.
+Need the schema without paying? `GET http://localhost:3000/entrypoints/explore/invoke` returns the same description plus input/output field metadata so tools like x402scan can introspect the endpoint.
 
 The agent is intentionally exploratory: if a user references an unfamiliar x402 resource it will call `fetch-schema`, inspect the HTTP status/body (even 402 errors), and describe any payment headers, networks, or schema fields that appear.
 
