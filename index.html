@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Schema Explorer Console</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      :root {
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        line-height: 1.5;
+        color: #0f172a;
+        background-color: #e2e8f0;
+      }
+      body {
+        margin: 0;
+        padding: 2rem;
+      }
+      main {
+        max-width: 960px;
+        margin: 0 auto;
+        background: #fff;
+        padding: 2rem;
+        border-radius: 18px;
+        box-shadow: 0 20px 45px rgba(15, 23, 42, 0.18);
+        display: flex;
+        flex-direction: column;
+        gap: 1.5rem;
+      }
+      header h1 {
+        margin: 0 0 0.5rem;
+      }
+      .settings {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 1rem;
+      }
+      label {
+        font-weight: 600;
+        display: block;
+        margin-bottom: 0.35rem;
+      }
+      input,
+      textarea {
+        width: 100%;
+        padding: 0.65rem 0.75rem;
+        border: 1px solid #cbd5f5;
+        border-radius: 8px;
+        font: inherit;
+        background: #fff;
+      }
+      textarea {
+        resize: vertical;
+        min-height: 80px;
+      }
+      .chat-panel {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 1rem;
+      }
+      .messages {
+        border: 1px solid #cbd5f5;
+        border-radius: 12px;
+        padding: 1rem;
+        height: 360px;
+        overflow-y: auto;
+        background: #f8fafc;
+      }
+      .messages[data-empty='true']::before {
+        content: 'No messages yet. Ask something about your API to get started.';
+        color: #64748b;
+        font-style: italic;
+      }
+      .message {
+        display: flex;
+        flex-direction: column;
+        gap: 0.2rem;
+        margin-bottom: 1rem;
+      }
+      .message:last-child {
+        margin-bottom: 0;
+      }
+      .message .bubble {
+        padding: 0.75rem 1rem;
+        border-radius: 12px;
+        max-width: 90%;
+        box-shadow: 0 6px 12px rgba(15, 23, 42, 0.08);
+        word-wrap: break-word;
+        white-space: pre-wrap;
+      }
+      .message.user {
+        align-items: flex-end;
+      }
+      .message.user .bubble {
+        background: #2563eb;
+        color: #fff;
+        border-bottom-right-radius: 4px;
+      }
+      .message.assistant {
+        align-items: flex-start;
+      }
+      .message.assistant .bubble {
+        background: #fff;
+        border: 1px solid #e2e8f0;
+        border-bottom-left-radius: 4px;
+        white-space: normal;
+      }
+      .message .role {
+        font-size: 0.8rem;
+        color: #94a3b8;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+      form {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+      }
+      .actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+      }
+      button {
+        padding: 0.75rem 1.5rem;
+        border: none;
+        border-radius: 999px;
+        background: #0f172a;
+        color: #fff;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button:disabled {
+        opacity: 0.6;
+        cursor: progress;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Schema Agent Console</h1>
+        <p>Talk to a Daydreams agent about a resource API surface. Messages hit <code>/entrypoints/explore/invoke</code>.</p>
+      </header>
+
+      <form id="schema-agent-form">
+        <div class="settings">
+          <div>
+            <label for="baseUrl">Base URL</label>
+            <input id="baseUrl" name="baseUrl" value="http://localhost:3000" required />
+          </div>
+          <div>
+            <label for="sessionId">Session ID (optional)</label>
+            <input id="sessionId" name="sessionId" placeholder="auto-generated if blank" />
+          </div>
+        </div>
+
+        <div class="chat-panel">
+          <div id="messages" class="messages" data-empty="true"></div>
+          <div>
+            <label for="message">Message</label>
+            <textarea id="message" name="message" placeholder="Tell me about the resource at http://localhost:3000/entrypoints/explore/invoke ." required></textarea>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button type="submit">Send</button>
+        </div>
+      </form>
+    </main>
+
+    <script>
+      const form = document.getElementById('schema-agent-form');
+      const messagesEl = document.getElementById('messages');
+
+      const clearPlaceholder = () => {
+        if (messagesEl.dataset.empty === 'true') {
+          messagesEl.removeAttribute('data-empty');
+          messagesEl.innerHTML = '';
+        }
+      };
+
+      const renderMarkdown = (text) => {
+        if (!text) {
+          return '';
+        }
+        if (window.marked && window.DOMPurify) {
+          const rawHtml = window.marked.parse(text, { breaks: true });
+          return window.DOMPurify.sanitize(rawHtml);
+        }
+        // Fallback: escape HTML and replace newlines.
+        const esc = document.createElement('div');
+        esc.textContent = text;
+        return esc.innerHTML.replace(/\n/g, '<br />');
+      };
+
+      const appendMessage = (role, text) => {
+        clearPlaceholder();
+        const wrapper = document.createElement('div');
+        wrapper.className = `message ${role}`;
+
+        const roleLabel = document.createElement('span');
+        roleLabel.className = 'role';
+        roleLabel.textContent = role === 'user' ? 'You' : 'Agent';
+
+        const bubble = document.createElement('div');
+        bubble.className = 'bubble';
+        if (role === 'assistant') {
+          bubble.innerHTML = renderMarkdown(text);
+        } else {
+          bubble.textContent = text;
+        }
+
+        wrapper.append(roleLabel, bubble);
+        messagesEl.appendChild(wrapper);
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+        return bubble;
+      };
+
+      const extractAssistantText = (responseValue) => {
+        const unwrapJson = (value) => {
+          let current = value;
+          for (let i = 0; i < 5; i += 1) {
+            if (typeof current !== 'string') {
+              return current;
+            }
+            const trimmed = current.trim();
+            if (!trimmed) {
+              return trimmed;
+            }
+            const looksJson =
+              trimmed.startsWith('{') ||
+              trimmed.startsWith('[') ||
+              trimmed.startsWith('"');
+            if (!looksJson) {
+              return trimmed;
+            }
+            try {
+              const parsed = JSON.parse(trimmed);
+              if (parsed === current) {
+                return current;
+              }
+              current = parsed;
+            } catch {
+              return trimmed;
+            }
+          }
+          return current;
+        };
+
+        const pluckContent = (value) => {
+          if (!value || typeof value !== 'object') {
+            return null;
+          }
+          if (typeof value.content === 'string') {
+            return value.content;
+          }
+          if (typeof value.message === 'string') {
+            return value.message;
+          }
+          if (Array.isArray(value) && value.length > 0) {
+            for (const entry of value) {
+              const nested = pluckContent(entry);
+              if (typeof nested === 'string' && nested.trim()) {
+                return nested;
+              }
+            }
+          }
+          if (typeof value.data === 'object') {
+            return pluckContent(value.data);
+          }
+          return null;
+        };
+
+        const normalized = unwrapJson(responseValue);
+        if (typeof normalized === 'string') {
+          const trimmed = normalized.trim();
+          if (!trimmed) {
+            return 'No response payload received.';
+          }
+          if (
+            (trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+            (trimmed.startsWith('[') && trimmed.endsWith(']')) ||
+            trimmed.startsWith('"')
+          ) {
+            try {
+              const parsed = JSON.parse(trimmed);
+              const lifted = pluckContent(parsed);
+              if (typeof lifted === 'string') {
+                return lifted;
+              }
+            } catch {
+              // ignore parse failure and fall through
+            }
+          }
+          return trimmed;
+        }
+        if (normalized && typeof normalized === 'object') {
+          const lifted = pluckContent(normalized);
+          if (typeof lifted === 'string') {
+            return lifted;
+          }
+          return JSON.stringify(normalized, null, 2);
+        }
+        if (typeof normalized === 'number' || typeof normalized === 'boolean') {
+          return String(normalized);
+        }
+        return 'No response payload received.';
+      };
+
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const submitButton = form.querySelector('button[type="submit"]');
+        submitButton.disabled = true;
+
+        const baseUrl = form.baseUrl.value.trim().replace(/\/$/, '');
+        const sessionId = form.sessionId.value.trim();
+        const message = form.message.value.trim();
+
+        if (!message) {
+          submitButton.disabled = false;
+          return;
+        }
+
+        appendMessage('user', message);
+        form.message.value = '';
+        const assistantBubble = appendMessage('assistant', '…');
+
+        const payload = {
+          input: {
+            message,
+          },
+        };
+
+        if (sessionId) {
+          payload.input.sessionId = sessionId;
+        }
+
+        try {
+          const result = await fetch(`${baseUrl}/entrypoints/explore/invoke`, {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+            },
+            body: JSON.stringify(payload),
+          });
+
+          if (!result.ok) {
+            assistantBubble.textContent = `Request failed with status ${result.status}.`;
+            return;
+          }
+
+          const json = await result.json();
+          const responseText = extractAssistantText(json?.output?.response);
+          if (json?.output?.sessionId && !sessionId) {
+            form.sessionId.value = json.output.sessionId;
+          }
+          assistantBubble.innerHTML = renderMarkdown(responseText);
+        } catch (error) {
+          assistantBubble.textContent = `Request failed: ${error instanceof Error ? error.message : String(error)}`;
+        } finally {
+          submitButton.disabled = false;
+        }
+      });
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.11/dist/purify.min.js" crossorigin="anonymous"></script>
+  </body>
+</html>
