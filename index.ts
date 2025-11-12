@@ -276,9 +276,41 @@ const handleCorsPreflight = (request: Request): Response | null => {
   });
 };
 
+type ForwardedRequestInit = RequestInit & { duplex?: 'half' };
+
+const normalizeForwardedRequest = (request: Request): Request => {
+  // Railway (and similar proxies) terminate TLS and forward the request over http, so
+  // we honor X-Forwarded-Proto to keep the paywall resource URL aligned with HTTPS.
+  const protoHeader = request.headers.get('x-forwarded-proto');
+  if (!protoHeader) {
+    return request;
+  }
+  const forwardedProto = protoHeader.split(',')[0]?.trim();
+  if (!forwardedProto) {
+    return request;
+  }
+  const currentUrl = new URL(request.url);
+  const currentProto = currentUrl.protocol.replace(':', '');
+  if (currentProto === forwardedProto) {
+    return request;
+  }
+  currentUrl.protocol = `${forwardedProto}:`;
+  const cloned = request.clone();
+  const init: ForwardedRequestInit = {
+    method: cloned.method,
+    headers: Array.from(cloned.headers.entries()),
+    body: cloned.body ?? undefined,
+  };
+  if (cloned.body) {
+    init.duplex = 'half';
+  }
+  return new Request(currentUrl.toString(), init);
+};
+
 const server = Bun.serve({
   port,
-  fetch: async (request) => {
+  fetch: async (incomingRequest) => {
+    const request = normalizeForwardedRequest(incomingRequest);
     const preflight = handleCorsPreflight(request);
     if (preflight) {
       return preflight;
