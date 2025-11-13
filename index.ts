@@ -2,6 +2,8 @@ import { createAgentApp } from '@lucid-agents/agent-kit-hono';
 import { paymentsFromEnv } from '@lucid-agents/agent-kit';
 import { createDreams, context, LogLevel, action, Logger } from '@daydreamsai/core';
 import { openrouter } from '@openrouter/ai-sdk-provider';
+import { createHash } from 'node:crypto';
+import type { Hono, MiddlewareHandler } from 'hono';
 import { z } from 'zod';
 
 type TranscriptEntry = {
@@ -98,6 +100,106 @@ const stringifyUnknown = (value: unknown): string | undefined => {
   } catch {
     return String(value);
   }
+};
+
+const REQUEST_ID_HEADER = 'x-schemaagent-request-id';
+
+const summarizeHeaderValue = (value?: string | null): string | undefined => {
+  if (!value) {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  const hash = createHash('sha256').update(trimmed).digest('hex').slice(0, 12);
+  return `${hash} (len=${trimmed.length})`;
+};
+
+const resolveEntrypointRouteKind = (path: string): 'invoke' | 'stream' | 'unknown' => {
+  if (path.endsWith('/stream')) {
+    return 'stream';
+  }
+  if (path.endsWith('/invoke')) {
+    return 'invoke';
+  }
+  return 'unknown';
+};
+
+const registerEntrypointPaymentLogging = (app: Hono, options: { enabled: boolean }): void => {
+  if (!options.enabled) {
+    logger.info('Entrypoint payment diagnostics middleware disabled (payments off)');
+    return;
+  }
+  logger.info('Entrypoint payment diagnostics middleware enabled');
+  const middleware: MiddlewareHandler = async (c, next) => {
+    const requestId = c.req.header(REQUEST_ID_HEADER) ?? crypto.randomUUID();
+    const entrypointKey = c.req.param('key') ?? 'unknown';
+    const routeKind = resolveEntrypointRouteKind(c.req.path);
+    const paymentHeader = c.req.header('x-payment');
+    const paymentFingerprint = summarizeHeaderValue(paymentHeader);
+    const startedAt = Date.now();
+
+    logger.info('Paid entrypoint request received', {
+      requestId,
+      entrypointKey,
+      routeKind,
+      method: c.req.method,
+      path: c.req.path,
+      hasPaymentHeader: Boolean(paymentHeader),
+      paymentHeaderFingerprint: paymentFingerprint ?? null,
+    });
+
+    try {
+      await next();
+    } catch (error) {
+      logger.error('Paid entrypoint pipeline threw before response', {
+        requestId,
+        entrypointKey,
+        routeKind,
+        error: error instanceof Error ? error.message : stringifyUnknown(error),
+      });
+      throw error;
+    } finally {
+      const response = c.res;
+      const status = response?.status ?? 0;
+      const durationMs = Date.now() - startedAt;
+      const paymentResponseHeader = response?.headers?.get('x-payment-response');
+      const paymentResponseFingerprint = summarizeHeaderValue(paymentResponseHeader);
+      const challengePrice = response?.headers?.get('x-price') ?? undefined;
+      const challengeNetwork = response?.headers?.get('x-network') ?? undefined;
+      const challengePayTo = response?.headers?.get('x-pay-to') ?? undefined;
+      const facilitatorHeader = response?.headers?.get('x-facilitator') ?? undefined;
+
+      logger.info('Paid entrypoint request completed', {
+        requestId,
+        entrypointKey,
+        routeKind,
+        status,
+        durationMs,
+        settled: Boolean(paymentResponseHeader),
+        paymentResponseFingerprint: paymentResponseFingerprint ?? null,
+        challengePrice: status === 402 ? challengePrice ?? null : null,
+        challengeNetwork: status === 402 ? challengeNetwork ?? null : null,
+        challengePayTo: status === 402 ? challengePayTo ?? null : null,
+        facilitator: status === 402 ? facilitatorHeader ?? null : null,
+      });
+
+      if (status === 402 && paymentHeader) {
+        logger.warn('Paid request returned payment required response', {
+          requestId,
+          entrypointKey,
+          routeKind,
+          paymentHeaderFingerprint: paymentFingerprint ?? null,
+          paymentResponseFingerprint: paymentResponseFingerprint ?? null,
+          challengeNetwork: challengeNetwork ?? null,
+          challengePrice: challengePrice ?? null,
+        });
+      }
+    }
+  };
+
+  app.use('/entrypoints/:key/*', middleware);
 };
 
 const extractResponseText = (log: DaydreamsLog): string | undefined => {
@@ -324,6 +426,11 @@ const { app, addEntrypoint } = createAgentApp(
   },
   {
     payments: resolvedPayments,
+    beforeMount: (honoApp) => {
+      registerEntrypointPaymentLogging(honoApp, {
+        enabled: Boolean(resolvedPayments),
+      });
+    },
   }
 );
 logger.info('Agent application initialized', {
@@ -548,16 +655,28 @@ const normalizeForwardedRequest = (request: Request): Request => {
   return normalized;
 };
 
+const ensureRequestIdHeader = (request: Request, requestId: string): Request => {
+  if (request.headers.get(REQUEST_ID_HEADER)) {
+    return request;
+  }
+  const headers = new Headers(request.headers);
+  headers.set(REQUEST_ID_HEADER, requestId);
+  return new Request(request, { headers });
+};
+
 const server = Bun.serve({
   port,
   fetch: async (incomingRequest) => {
-    const requestId = crypto.randomUUID();
+    const upstreamRequestId = incomingRequest.headers.get(REQUEST_ID_HEADER);
+    const requestId = upstreamRequestId ?? crypto.randomUUID();
     logger.info('Incoming HTTP request received', {
       requestId,
       method: incomingRequest.method,
       url: incomingRequest.url,
+      hasPaymentHeader: incomingRequest.headers.has('x-payment'),
+      paymentHeaderFingerprint: summarizeHeaderValue(incomingRequest.headers.get('x-payment')) ?? null,
     });
-    const request = normalizeForwardedRequest(incomingRequest);
+    const request = ensureRequestIdHeader(normalizeForwardedRequest(incomingRequest), requestId);
     const preflight = handleCorsPreflight(request);
     if (preflight) {
       logger.info('Responding to CORS preflight', { requestId });
@@ -568,9 +687,15 @@ const server = Bun.serve({
       url: request.url,
     });
     const response = await app.fetch(request);
+    const paymentResponseHeader = response.headers.get('x-payment-response');
     logger.info('App handler produced response', {
       requestId,
       status: response.status,
+      paymentResponseHeaderPresent: Boolean(paymentResponseHeader),
+      paymentResponseFingerprint: summarizeHeaderValue(paymentResponseHeader) ?? null,
+      challengePrice: response.status === 402 ? response.headers.get('x-price') ?? null : null,
+      challengeNetwork: response.status === 402 ? response.headers.get('x-network') ?? null : null,
+      challengePayTo: response.status === 402 ? response.headers.get('x-pay-to') ?? null : null,
     });
     const finalResponse = applyCors(response);
     logger.debug('CORS headers applied to response', { requestId });
